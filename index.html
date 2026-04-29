@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>传感器数据滤波仿真调试工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Microsoft YaHei', sans-serif;
+        }
+        body {
+            background-color: #1a1a2e;
+            color: #eee;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #4cc9f0;
+            margin-bottom: 20px;
+        }
+        .control-panel {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        label {
+            font-size: 14px;
+            color: #a8dadc;
+        }
+        select, input[type="range"], button {
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            background: #0f3460;
+            color: #fff;
+            font-size: 14px;
+        }
+        button {
+            background: #4cc9f0;
+            color: #1a1a2e;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        button:hover {
+            background: #4361ee;
+            color: white;
+        }
+        .chart-container {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 12px;
+        }
+        canvas {
+            width: 100%;
+            height: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 传感器数据滤波仿真调试工具</h1>
+
+        <div class="control-panel">
+            <div class="control-group">
+                <label>选择滤波算法</label>
+                <select id="filterType">
+                    <option value="mean">均值滤波</option>
+                    <option value="median">中值滤波</option>
+                    <option value="movingAverage">滑动平均</option>
+                    <option value="kalman">简化卡尔曼滤波</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>滤波窗口大小: <span id="windowSizeVal">5</span></label>
+                <input type="range" id="windowSize" min="3" max="21" value="5" step="2">
+            </div>
+
+            <div class="control-group">
+                <label>噪声强度: <span id="noiseLevelVal">10</span></label>
+                <input type="range" id="noiseLevel" min="1" max="30" value="10" step="1">
+            </div>
+
+            <div class="control-group">
+                <button id="regenerateBtn">重新生成数据</button>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="chart"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // 控件
+        const filterTypeSelect = document.getElementById('filterType');
+        const windowSizeSlider = document.getElementById('windowSize');
+        const windowSizeVal = document.getElementById('windowSizeVal');
+        const noiseLevelSlider = document.getElementById('noiseLevel');
+        const noiseLevelVal = document.getElementById('noiseLevelVal');
+        const regenerateBtn = document.getElementById('regenerateBtn');
+        const canvas = document.getElementById('chart');
+        const ctx = canvas.getContext('2d');
+
+        // 全局变量
+        let rawData = [];
+        let filteredData = [];
+        let chartInstance;
+
+        // 更新滑块数值显示
+        windowSizeSlider.addEventListener('input', () => {
+            windowSizeVal.textContent = windowSizeSlider.value;
+            updateFilteredData();
+            renderChart();
+        });
+        noiseLevelSlider.addEventListener('input', () => {
+            noiseLevelVal.textContent = noiseLevelSlider.value;
+            generateRawData();
+            updateFilteredData();
+            renderChart();
+        });
+        filterTypeSelect.addEventListener('change', () => {
+            updateFilteredData();
+            renderChart();
+        });
+        regenerateBtn.addEventListener('click', () => {
+            generateRawData();
+            updateFilteredData();
+            renderChart();
+        });
+
+        // 1. 生成带噪声的模拟传感器数据（正弦波+随机噪声）
+        function generateRawData() {
+            rawData = [];
+            const noiseLevel = parseInt(noiseLevelSlider.value);
+            for (let i = 0; i < 200; i++) {
+                // 基础信号：正弦波
+                const baseSignal = 50 + 20 * Math.sin(i / 10);
+                // 加噪声
+                const noise = (Math.random() - 0.5) * 2 * noiseLevel;
+                rawData.push(baseSignal + noise);
+            }
+        }
+
+        // 2. 均值滤波
+        function meanFilter(data, windowSize) {
+            const result = [];
+            const halfWindow = Math.floor(windowSize / 2);
+            for (let i = 0; i < data.length; i++) {
+                let sum = 0;
+                let count = 0;
+                for (let j = i - halfWindow; j <= i + halfWindow; j++) {
+                    if (j >= 0 && j < data.length) {
+                        sum += data[j];
+                        count++;
+                    }
+                }
+                result.push(sum / count);
+            }
+            return result;
+        }
+
+        // 3. 中值滤波
+        function medianFilter(data, windowSize) {
+            const result = [];
+            const halfWindow = Math.floor(windowSize / 2);
+            for (let i = 0; i < data.length; i++) {
+                const window = [];
+                for (let j = i - halfWindow; j <= i + halfWindow; j++) {
+                    if (j >= 0 && j < data.length) {
+                        window.push(data[j]);
+                    }
+                }
+                window.sort((a, b) => a - b);
+                result.push(window[Math.floor(window.length / 2)]);
+            }
+            return result;
+        }
+
+        // 4. 滑动平均滤波
+        function movingAverageFilter(data, windowSize) {
+            const result = [];
+            const queue = [];
+            let sum = 0;
+            for (let i = 0; i < data.length; i++) {
+                queue.push(data[i]);
+                sum += data[i];
+                if (queue.length > windowSize) {
+                    sum -= queue.shift();
+                }
+                result.push(sum / queue.length);
+            }
+            return result;
+        }
+
+        // 5. 简化卡尔曼滤波
+        function kalmanFilter(data) {
+            const result = [];
+            let x = data[0]; // 初始估计值
+            let p = 1;       // 初始协方差
+            const Q = 0.01;  // 过程噪声协方差
+            const R = parseInt(noiseLevelSlider.value) * 0.5; // 测量噪声协方差
+            for (let i = 0; i < data.length; i++) {
+                // 预测
+                p = p + Q;
+                // 更新
+                const k = p / (p + R); // 卡尔曼增益
+                x = x + k * (data[i] - x);
+                p = (1 - k) * p;
+                result.push(x);
+            }
+            return result;
+        }
+
+        // 更新滤波后数据
+        function updateFilteredData() {
+            const filterType = filterTypeSelect.value;
+            const windowSize = parseInt(windowSizeSlider.value);
+            switch (filterType) {
+                case 'mean':
+                    filteredData = meanFilter(rawData, windowSize);
+                    break;
+                case 'median':
+                    filteredData = medianFilter(rawData, windowSize);
+                    break;
+                case 'movingAverage':
+                    filteredData = movingAverageFilter(rawData, windowSize);
+                    break;
+                case 'kalman':
+                    filteredData = kalmanFilter(rawData);
+                    break;
+            }
+        }
+
+        // 渲染图表
+        function renderChart() {
+            const labels = rawData.map((_, i) => i);
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '原始带噪声数据',
+                            data: rawData,
+                            borderColor: '#ff6b6b',
+                            backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                            borderWidth: 1,
+                            pointRadius: 0
+                        },
+                        {
+                            label: '滤波后数据',
+                            data: filteredData,
+                            borderColor: '#4cc9f0',
+                            backgroundColor: 'rgba(76, 201, 240, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 0
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: { display: true, text: '采样点', color: '#a8dadc' },
+                            ticks: { color: '#a8dadc' },
+                            grid: { color: '#0f3460' }
+                        },
+                        y: {
+                            title: { display: true, text: '数值', color: '#a8dadc' },
+                            ticks: { color: '#a8dadc' },
+                            grid: { color: '#0f3460' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#a8dadc' }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 初始化
+        generateRawData();
+        updateFilteredData();
+        renderChart();
+    </script>
+</body>
+</html>
